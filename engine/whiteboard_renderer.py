@@ -1,26 +1,23 @@
-"""Whiteboard Doodly Explainer Video Renderer.
+"""Whiteboard Doodly Explainer Video Renderer using Chrome Headless.
 
-Renders 1080x1920 vertical video Reels in the authentic "เอ๊ะ เรื่องอะไร" whiteboard style:
+Renders 1080x1920 vertical video Reels with 100% flawless Thai font shaping
+(using Google Chrome/Chromium Blink HarfBuzz layout engine):
 - Off-white paper background (#FAF9F6)
 - Hand-drawn vector doodles (house, bank transfer, warning, calculator, checklist)
 - Marker pen overlay at active annotation areas
-- Warm terracotta (#E06D53) and sage teal (#3F8A8C) accents
+- Perfect Thai vowels and tone marks (never broken, never detached)
 - Rounded white subtitle card with soft drop shadow
-- Perfect audio-visual synchronization per beat
+- Synchronized beat rendering + Lo-fi BGM mixing
 """
 from __future__ import annotations
 
-import io
-import json
 import logging
-import math
 import os
-import re
+import shutil
 import subprocess
-from dataclasses import dataclass, field
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-import cairosvg
 
 logger = logging.getLogger(__name__)
 
@@ -55,104 +52,272 @@ class ExplainerTopic:
     beats: list[ExplainerBeat]
 
 
-def _read_doodle_inner(doodle_name: str) -> str:
-    path = DOODLES_DIR / f"{doodle_name}.svg"
-    if not path.is_file():
-        path = DOODLES_DIR / "house.svg"
-    raw = path.read_text(encoding="utf-8")
-    start = raw.find(">") + 1
-    end = raw.rfind("</svg>")
-    return raw[start:end]
+def find_chrome_executable() -> str:
+    """Finds Google Chrome or Chromium executable on macOS or Linux."""
+    env_path = os.environ.get("CHROME_PATH", "").strip()
+    if env_path and (Path(env_path).is_file() or shutil.which(env_path)):
+        return env_path
+
+    mac_candidates = [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        str(Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+    ]
+    for c in mac_candidates:
+        if Path(c).is_file():
+            return c
+
+    linux_candidates = [
+        "google-chrome",
+        "google-chrome-stable",
+        "chromium-browser",
+        "chromium",
+    ]
+    for c in linux_candidates:
+        found = shutil.which(c)
+        if found:
+            return found
+
+    raise RuntimeError(
+        "Google Chrome or Chromium is required for high-fidelity Thai font rendering. "
+        "Please install Google Chrome or set the CHROME_PATH environment variable."
+    )
 
 
-def render_whiteboard_svg(
+def render_html_to_png(html_content: str, output_png: Path, width: int = WIDTH, height: int = HEIGHT) -> Path:
+    """Renders HTML directly to PNG via headless Chrome for flawless font rendering."""
+    chrome_bin = find_chrome_executable()
+    output_png.parent.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf-8") as tf:
+        tf.write(html_content)
+        temp_html_path = tf.name
+
+    try:
+        cmd = [
+            chrome_bin,
+            "--headless",
+            "--disable-gpu",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--allow-file-access-from-files",
+            "--enable-font-antialiasing",
+            f"--screenshot={output_png}",
+            f"--window-size={width},{height}",
+            "--hide-scrollbars",
+            f"file://{Path(temp_html_path).resolve()}",
+        ]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if not output_png.is_file() or output_png.stat().st_size < 1000:
+            logger.error("Chrome headless render failed: %s", res.stderr)
+            raise RuntimeError(f"Failed to render HTML frame to {output_png}")
+    finally:
+        try:
+            os.remove(temp_html_path)
+        except OSError:
+            pass
+
+    return output_png
+
+
+def build_beat_html(
     beat: ExplainerBeat,
     subtitle_line1: str,
     subtitle_line2: str = "",
     callouts_visible: int = 2,
     show_marker: bool = True,
 ) -> str:
-    """Builds the full 1080x1920 SVG for a whiteboard explainer beat."""
-    doodle_content = _read_doodle_inner(beat.doodle_name)
-    marker_content = _read_doodle_inner("marker_pen")
+    """Builds clean HTML with modern CSS, perfect Thai typography, and SVG doodles."""
+    doodle_svg_path = DOODLES_DIR / f"{beat.doodle_name}.svg"
+    if not doodle_svg_path.is_file():
+        doodle_svg_path = DOODLES_DIR / "house.svg"
+    doodle_url = f"file://{doodle_svg_path.resolve()}"
 
-    # Generate Callout Pills
-    callouts_svg = ""
-    start_y = 1050
-    colors = [
-        ("#FFFFFF", "#3F8A8C", "#3F8A8C"),  # bg, stroke, text
-        ("#FDF2EE", "#E06D53", "#E06D53"),
-        ("#FEF8E8", "#E8A838", "#2B3A42"),
-    ]
+    marker_svg_path = DOODLES_DIR / "marker_pen.svg"
+    marker_url = f"file://{marker_svg_path.resolve()}"
 
+    font_bold_url = f"file://{(FONTS_DIR / 'Kanit-Bold.ttf').resolve()}"
+    font_med_url = f"file://{(FONTS_DIR / 'Kanit-Medium.ttf').resolve()}"
+
+    # Build Callout Cards
+    callout_html = ""
     for idx, text in enumerate(beat.callouts[:callouts_visible]):
-        bg, border, txt_color = colors[idx % len(colors)]
-        curr_y = start_y + (idx * 145)
-        callouts_svg += f"""
-        <g transform="translate(90, {curr_y})">
-          <rect width="900" height="115" rx="22" fill="{bg}" stroke="{border}" stroke-width="4" filter="url(#shadow)"/>
-          <text x="45" y="70" font-family="Kanit, 'Sukhumvit Set', sans-serif" font-size="32" font-weight="600" fill="{txt_color}">{text}</text>
-        </g>
-        """
+        alt_class = " alt" if idx % 2 == 1 else ""
+        callout_html += f'<div class="callout-card{alt_class}">{text}</div>\n'
 
-    # Marker Pen Position
-    marker_x, marker_y = beat.marker_coords
-    marker_svg = ""
+    marker_html = ""
     if show_marker:
-        marker_svg = f"""
-        <g transform="translate({marker_x}, {marker_y}) scale(0.85)">
-          {marker_content}
-        </g>
-        """
+        marker_html = f'<img class="marker-pen" src="{marker_url}">'
 
-    # Subtitle Card
-    sub_l2_svg = ""
+    sub_l2_html = ""
     if subtitle_line2:
-        sub_l2_svg = f"""<text x="50" y="115" font-family="Kanit, 'Sukhumvit Set', sans-serif" font-size="28" font-weight="500" fill="#E06D53">{subtitle_line2}</text>"""
-        card_h = 155
-        card_y = 1620
-    else:
-        card_h = 125
-        card_y = 1650
+        sub_l2_html = f'<div class="sub-l2">{subtitle_line2}</div>'
 
-    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{HEIGHT}" viewBox="0 0 {WIDTH} {HEIGHT}">
-  <defs>
-    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
-      <feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#000000" flood-opacity="0.07"/>
-    </filter>
-  </defs>
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@400;500;600;700;800&display=swap');
 
-  <!-- Background Whiteboard -->
-  <rect width="{WIDTH}" height="{HEIGHT}" fill="#FAF9F6"/>
+  @font-face {{
+    font-family: 'Kanit';
+    src: url('{font_bold_url}') format('truetype');
+    font-weight: 700;
+  }}
+  @font-face {{
+    font-family: 'Kanit';
+    src: url('{font_med_url}') format('truetype');
+    font-weight: 500;
+  }}
 
-  <!-- Brand Masthead Header -->
-  <text x="80" y="85" font-family="Kanit, 'Sukhumvit Set', sans-serif" font-size="36" font-weight="bold" fill="#2B3A42">คิดให้คุ้ม 💡</text>
-  <text x="80" y="128" font-family="Kanit, 'Sukhumvit Set', sans-serif" font-size="20" font-weight="500" fill="#7A8E99">เห็นตัวเลขจริงก่อนตัดสินใจ</text>
-  <line x1="80" y1="155" x2="1000" y2="155" stroke="#E2E8F0" stroke-width="3" stroke-linecap="round"/>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    width: {WIDTH}px;
+    height: {HEIGHT}px;
+    background: #FAF9F6;
+    font-family: 'Kanit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    padding: 70px 80px;
+    position: relative;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }}
 
-  <!-- Beat Heading -->
-  <text x="80" y="240" font-family="Kanit, 'Sukhumvit Set', sans-serif" font-size="56" font-weight="bold" fill="#E06D53">{beat.title}</text>
-  <text x="80" y="315" font-family="Kanit, 'Sukhumvit Set', sans-serif" font-size="34" font-weight="600" fill="#2B3A42">{beat.subtitle}</text>
+  .header {{
+    border-bottom: 2px solid #E2E8F0;
+    padding-bottom: 25px;
+  }}
+  .brand {{
+    font-size: 38px;
+    font-weight: 700;
+    color: #2B3A42;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }}
+  .brand-sub {{
+    font-size: 22px;
+    font-weight: 500;
+    color: #7A8E99;
+    margin-top: 6px;
+  }}
 
-  <!-- Centered Doodle Graphic -->
-  <g transform="translate(265, 420) scale(1.1)">
-    {doodle_content}
-  </g>
+  .title-group {{ margin-top: 45px; }}
+  .title {{
+    font-size: 64px;
+    font-weight: 800;
+    color: #E06D53;
+    line-height: 1.25;
+  }}
+  .subtitle {{
+    font-size: 36px;
+    font-weight: 600;
+    color: #2B3A42;
+    margin-top: 15px;
+    line-height: 1.3;
+  }}
 
-  <!-- Animated Callouts / Info Pills -->
-  {callouts_svg}
+  .doodle-container {{
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-top: 45px;
+    height: 480px;
+  }}
+  .doodle-img {{
+    max-width: 820px;
+    max-height: 460px;
+    object-fit: contain;
+  }}
 
-  <!-- Marker Pen -->
-  {marker_svg}
+  .callouts-container {{
+    margin-top: 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    position: relative;
+  }}
+  .callout-card {{
+    background: #FFFFFF;
+    border: 3.5px solid #3F8A8C;
+    border-radius: 24px;
+    padding: 26px 36px;
+    font-size: 32px;
+    font-weight: 600;
+    color: #3F8A8C;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+    line-height: 1.35;
+  }}
+  .callout-card.alt {{
+    border-color: #E06D53;
+    color: #E06D53;
+    background: #FDF2EE;
+  }}
 
-  <!-- Bottom Subtitle Card -->
-  <g transform="translate(90, {card_y})">
-    <rect width="900" height="{card_h}" rx="24" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="2" filter="url(#shadow)"/>
-    <text x="50" y="68" font-family="Kanit, 'Sukhumvit Set', sans-serif" font-size="32" font-weight="bold" fill="#2B3A42">{subtitle_line1}</text>
-    {sub_l2_svg}
-  </g>
-</svg>"""
-    return svg
+  .marker-pen {{
+    position: absolute;
+    right: -30px;
+    top: 75px;
+    width: 180px;
+    height: 180px;
+    transform: rotate(15deg);
+    filter: drop-shadow(0 12px 20px rgba(0,0,0,0.15));
+  }}
+
+  .subtitle-card {{
+    position: absolute;
+    bottom: 80px;
+    left: 80px;
+    right: 80px;
+    background: #FFFFFF;
+    border: 2px solid #E2E8F0;
+    border-radius: 28px;
+    padding: 32px 40px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.07);
+  }}
+  .sub-l1 {{
+    font-size: 32px;
+    font-weight: 700;
+    color: #2B3A42;
+    line-height: 1.4;
+  }}
+  .sub-l2 {{
+    font-size: 28px;
+    font-weight: 600;
+    color: #E06D53;
+    margin-top: 10px;
+    line-height: 1.4;
+  }}
+</style>
+</head>
+<body>
+  <div class="header">
+    <div class="brand">คิดให้คุ้ม 💡</div>
+    <div class="brand-sub">เห็นตัวเลขจริงก่อนตัดสินใจ</div>
+  </div>
+
+  <div class="title-group">
+    <div class="title">{beat.title}</div>
+    <div class="subtitle">{beat.subtitle}</div>
+  </div>
+
+  <div class="doodle-container">
+    <img class="doodle-img" src="{doodle_url}">
+  </div>
+
+  <div class="callouts-container">
+    {callout_html}
+    {marker_html}
+  </div>
+
+  <div class="subtitle-card">
+    <div class="sub-l1">{subtitle_line1}</div>
+    {sub_l2_html}
+  </div>
+</body>
+</html>"""
+    return html
 
 
 def render_beat_video_segment(
@@ -161,7 +326,7 @@ def render_beat_video_segment(
     output_mp4: Path,
     work_dir: Path,
 ) -> Path:
-    """Renders a single synchronized video segment for one beat."""
+    """Renders a single synchronized video segment for one beat using Chrome Headless."""
     work_dir.mkdir(parents=True, exist_ok=True)
     output_mp4.parent.mkdir(parents=True, exist_ok=True)
 
@@ -173,14 +338,14 @@ def render_beat_video_segment(
     duration = float(subprocess.check_output(cmd_probe, text=True).strip())
     beat.duration = duration
 
-    # 2. Split script into 2-3 subtitle chunks for dynamic reading
+    # 2. Split script into 2 subtitle chunks
     words = beat.spoken_script.split()
     mid = len(words) // 2
     sub1_first = " ".join(words[:mid]) if words else beat.title
     sub1_second = " ".join(words[mid:]) if mid < len(words) else ""
 
     # Phase 1 Frame (first half)
-    svg_phase1 = render_whiteboard_svg(
+    html_p1 = build_beat_html(
         beat=beat,
         subtitle_line1=sub1_first,
         subtitle_line2="",
@@ -188,10 +353,10 @@ def render_beat_video_segment(
         show_marker=True,
     )
     frame1_png = work_dir / f"beat_{beat.beat_id}_p1.png"
-    cairosvg.svg2png(bytestring=svg_phase1.encode("utf-8"), write_to=str(frame1_png))
+    render_html_to_png(html_p1, frame1_png)
 
     # Phase 2 Frame (second half - all callouts visible)
-    svg_phase2 = render_whiteboard_svg(
+    html_p2 = build_beat_html(
         beat=beat,
         subtitle_line1=sub1_first,
         subtitle_line2=sub1_second,
@@ -199,7 +364,7 @@ def render_beat_video_segment(
         show_marker=False,
     )
     frame2_png = work_dir / f"beat_{beat.beat_id}_p2.png"
-    cairosvg.svg2png(bytestring=svg_phase2.encode("utf-8"), write_to=str(frame2_png))
+    render_html_to_png(html_p2, frame2_png)
 
     t1 = duration * 0.45
     t2 = duration - t1
@@ -231,7 +396,7 @@ def render_complete_whiteboard_explainer(
     output_mp4: Path,
     work_dir: Path,
 ) -> Path:
-    """Renders all beats, concatenates them, and mixes in the lo-fi BGM."""
+    """Renders all beats with Chrome Headless, concatenates them, and mixes in the lo-fi BGM."""
     work_dir.mkdir(parents=True, exist_ok=True)
     output_mp4.parent.mkdir(parents=True, exist_ok=True)
 
