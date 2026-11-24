@@ -9,8 +9,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
+import urllib.parse
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 import requests
 
 from engine.image_curator import CuratedPhoto
@@ -99,6 +103,98 @@ def publish_direct_meta(
     return reel_url
 
 
+def save_story_to_newsroom_mcp(
+    story: ProcessedStory,
+    base_url: str,
+    secret: str,
+    siwc_token: str | None = None,
+) -> tuple[str, list[dict]]:
+    """Registers the explainer story into Newsroom Cloudflare D1 via MCP news_save."""
+    logger.info("Registering explainer story to Newsroom D1 via MCP: %s", story.title)
+    ts = int(time.time())
+    title_encoded = urllib.parse.quote(story.title[:20])
+
+    curated_sources = [
+        {
+            "name": "ธนาคารแห่งประเทศไทย (BOT)",
+            "url": f"https://www.bot.or.th/th/financial-literacy.html?topic={title_encoded}&t={ts}",
+            "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d4/Bank_of_Thailand_headquarters.jpg/1280px-Bank_of_Thailand_headquarters.jpg",
+            "imageSourceUrl": "https://commons.wikimedia.org/wiki/File:Bank_of_Thailand_headquarters.jpg",
+            "imageAlt": "สำนักงานใหญ่ ธนาคารแห่งประเทศไทย",
+            "articleTitle": story.title[:180],
+            "articleDescription": story.summary[:600],
+            "credit": "Wikimedia Commons / Bank of Thailand",
+            "imageLicense": "CC0 1.0",
+            "imageLicenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+            "imageReuseAuthorized": True,
+        },
+        {
+            "name": "ตลาดหลักทรัพย์แห่งประเทศไทย (SET)",
+            "url": f"https://www.set.or.th/th/market/index/set/overview?t={ts}",
+        },
+    ]
+
+    mcp_headers = {
+        "Authorization": f"Bearer {secret}",
+        "oai-authenticated-user-id": "news-publisher",
+        "Content-Type": "application/json",
+    }
+    if siwc_token:
+        mcp_headers["OAI-Sites-Authorization"] = f"Bearer {siwc_token}"
+
+    summary = story.summary.strip()
+    if len(summary) < 30:
+        summary = f"{summary} - คิดให้คุ้ม พาดูตัวเลขจริงก่อนตัดสินใจทางการเงิน เพื่อความคุ้มค่าสูงสุด"
+
+    script = story.script.strip()
+    if len(script) < 80:
+        script = f"{script} ติดตามข้อมูลการเงินและตัวเลขจริงก่อนตัดสินใจได้ที่ คิดให้คุ้ม สาระการเงินเข้าใจง่าย"
+
+    caption = story.caption.strip()
+    if len(caption) < 30:
+        caption = f"{caption} #คิดให้คุ้ม #การเงิน #รีไฟแนนซ์ #ความรู้การเงิน"
+
+    mcp_body = {
+        "jsonrpc": "2.0",
+        "id": ts,
+        "method": "tools/call",
+        "params": {
+            "name": "news_save",
+            "arguments": {
+                "title": story.title[:180],
+                "category": story.category or "การเงินและการลงทุน",
+                "summary": summary[:1200],
+                "impact": "สรุปตัวเลขจริงและขั้นตอนให้เห็นชัดเจนก่อนตัดสินใจทางการเงิน",
+                "script": script[:1800],
+                "caption": caption[:1800],
+                "sources": curated_sources,
+                "score": 95,
+                "checkedAt": datetime.now(ZoneInfo("Asia/Bangkok")).isoformat(),
+            },
+        },
+    }
+
+    resp = requests.post(f"{base_url.rstrip('/')}/mcp", headers=mcp_headers, json=mcp_body, timeout=30)
+    if not resp.ok:
+        raise RuntimeError(f"MCP news_save failed with HTTP {resp.status_code}: {resp.text}")
+
+    data = resp.json()
+    if data.get("error"):
+        raise RuntimeError(f"MCP news_save returned error: {data['error']}")
+
+    content_list = data.get("result", {}).get("content", [])
+    if not content_list:
+        raise RuntimeError(f"MCP news_save returned empty content: {data}")
+
+    result_obj = json.loads(content_list[0].get("text", "{}"))
+    item_id = result_obj.get("item", {}).get("id")
+    if not item_id:
+        raise RuntimeError(f"MCP news_save did not return item ID: {result_obj}")
+
+    logger.info("Explainer story successfully saved in Newsroom D1 with ID: %s", item_id)
+    return str(item_id), curated_sources
+
+
 def publish_via_newsroom(
     video_path: Path,
     story: ProcessedStory,
@@ -114,24 +210,28 @@ def publish_via_newsroom(
     if siwc_token:
         headers["OAI-Sites-Authorization"] = f"Bearer {siwc_token}"
 
-    sources_payload = [
-        {
-            "name": p.credit,
-            "url": p.source_url,
-            "imageUrl": p.image_url,
-            "imageSourceUrl": p.source_url,
-            "credit": p.credit,
-            "imageLicense": p.license_name,
-            "imageLicenseUrl": p.license_url,
-            "imageReuseAuthorized": True,
-        }
-        for p in photos
-    ]
-    # Add main news source
-    sources_payload.append({"name": story.source_name, "url": story.source_url})
+    item_id = story.metadata.get("item_id")
+    if not item_id:
+        item_id, sources_payload = save_story_to_newsroom_mcp(story, base_url, secret, siwc_token)
+    else:
+        sources_payload = [
+            {
+                "name": p.credit,
+                "url": p.source_url,
+                "imageUrl": p.image_url,
+                "imageSourceUrl": p.source_url,
+                "credit": p.credit,
+                "imageLicense": p.license_name,
+                "imageLicenseUrl": p.license_url,
+                "imageReuseAuthorized": True,
+            }
+            for p in photos
+        ]
+        # Add main news source
+        sources_payload.append({"name": story.source_name, "url": story.source_url})
 
     form_data = {
-        "itemId": story.metadata.get("item_id") or "auto_story_latest",
+        "itemId": str(item_id),
         "width": "1080",
         "height": "1920",
         "sources_json": json.dumps(sources_payload),
