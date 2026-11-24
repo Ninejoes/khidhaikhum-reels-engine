@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="500" height="500" fill="none">
+  <!-- Tie string -->
+  <path d="M210 130 C230 110, 270 110, 290 130" stroke="#E06D53" stroke-width="10" stroke-linecap="round"/>
+  <path d="M200 120 L180 80 C190 70, 220 75, 250 75 C280 75, 310 70, 320 80 L300 120" stroke="#2B3A42" stroke-width="12" fill="#FAF9F6"/>
+  <!-- Main Bag Body -->
+  <path d="M200 135 C130 160, 90 250, 90 340 C90 420, 160 450, 250 450 C340 450, 410 420, 410 340 C410 250, 370 160, 300 135 Z" stroke="#2B3A42" stroke-width="14" fill="#FAF9F6"/>
+  <!-- Baht Symbol -->
+  <text x="250" y="320" font-family="sans-serif" font-size="110" font-weight="bold" fill="#3F8A8C" text-anchor="middle" dominant-baseline="middle">฿</text>
+  <!-- Coin Stack Next to Bag -->
+  <ellipse cx="400" cy="420" rx="50" ry="18" stroke="#2B3A42" stroke-width="8" fill="#E8A838"/>
+  <ellipse cx="400" cy="395" rx="50" ry="18" stroke="#2B3A42" stroke-width="8" fill="#E8A838"/>
+  <ellipse cx="400" cy="370" rx="50" ry="18" stroke="#2B3A42" stroke-width="8" fill="#E8A838"/>
+</svg>

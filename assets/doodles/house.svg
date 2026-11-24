@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="500" height="500" fill="none">
+  <!-- Chimney & smoke -->
+  <path d="M340 180 L340 120 L380 120 L380 215" stroke="#2B3A42" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M360 95 C360 80, 375 75, 370 60 C365 45, 390 40, 385 25" stroke="#8CA0AA" stroke-width="8" stroke-linecap="round" stroke-dasharray="16 10"/>
+  <!-- Roof -->
+  <path d="M80 230 L250 85 L420 230" stroke="#E06D53" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M110 215 L250 105 L390 215" stroke="#E06D53" stroke-width="8" stroke-linecap="round"/>
+  <!-- House Body -->
+  <path d="M120 225 L120 420 C120 425, 125 430, 130 430 L370 430 C375 430, 380 425, 380 420 L380 225" stroke="#2B3A42" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="#FAF9F6"/>
+  <!-- Windows -->
+  <rect x="150" y="250" width="65" height="65" rx="8" stroke="#3F8A8C" stroke-width="10" fill="#E8F4F5"/>
+  <line x1="182" y1="250" x2="182" y2="315" stroke="#3F8A8C" stroke-width="6"/>
+  <line x1="150" y1="282" x2="215" y2="282" stroke="#3F8A8C" stroke-width="6"/>
+  
+  <rect x="285" y="250" width="65" height="65" rx="8" stroke="#3F8A8C" stroke-width="10" fill="#E8F4F5"/>
+  <line x1="317" y1="250" x2="317" y2="315" stroke="#3F8A8C" stroke-width="6"/>
+  <line x1="285" y1="282" x2="350" y2="282" stroke="#3F8A8C" stroke-width="6"/>
+  <!-- Door -->
+  <path d="M215 430 L215 340 C215 330, 225 320, 235 320 L265 320 C275 320, 285 330, 285 340 L285 430" stroke="#2B3A42" stroke-width="10" fill="#F4E9D8"/>
+  <circle cx="270" cy="380" r="6" fill="#E06D53"/>
+  <!-- Ground Grass -->
+  <path d="M60 440 L440 440" stroke="#2B3A42" stroke-width="12" stroke-linecap="round"/>
+  <path d="M80 435 L75 415 M85 435 L87 410 M92 435 L98 418" stroke="#3F8A8C" stroke-width="6" stroke-linecap="round"/>
+  <path d="M405 435 L400 415 M410 435 L412 410 M417 435 L423 418" stroke="#3F8A8C" stroke-width="6" stroke-linecap="round"/>
+</svg>

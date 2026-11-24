@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Think for Value (คิดให้คุ้ม) - All-in-One Automated News Reel Engine.
+"""Think for Value (คิดให้คุ้ม) - All-in-One Automated Video Reel Engine.
+
+Modes:
+  1. explainer (Default): Whiteboard Doodly Financial Explainer (matching reference #4742958775935653)
+  2. news: Fast 30s breaking news Reel with editorial photos and motion graphics
 
 Usage:
-  python main.py                  # Render latest news Reel to outputs/latest-reel.mp4
-  python main.py --publish        # Render and publish to Facebook Reels
-  python main.py --output out.mp4 # Specify custom output file
+  python main.py                              # Render Whiteboard Explainer to outputs/whiteboard-explainer.mp4
+  python main.py --mode news                  # Render 30s News Reel to outputs/latest-reel.mp4
+  python main.py --topic "รีไฟแนนซ์บ้าน"        # Custom topic for explainer
+  python main.py --publish                    # Render and publish to Facebook Reels
 """
 from __future__ import annotations
 
@@ -15,20 +20,57 @@ from pathlib import Path
 # Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from engine.pipeline import run_pipeline
+from engine.pipeline import run_explainer_pipeline, run_pipeline
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Think for Value Automated News Reel Engine")
-    parser.add_argument("--output", "-o", type=Path, default=Path("outputs/latest-reel.mp4"), help="Target output MP4 file path")
-    parser.add_argument("--publish", action="store_true", help="Publish the generated video Reel to Facebook")
+    parser = argparse.ArgumentParser(description="Think for Value Automated Video Reel Engine")
+    parser.add_argument(
+        "--mode",
+        choices=["explainer", "news"],
+        default="explainer",
+        help="Engine mode: 'explainer' (Whiteboard Doodly 2min) or 'news' (Breaking News 35s)",
+    )
+    parser.add_argument(
+        "--topic",
+        type=str,
+        default=None,
+        help="Optional topic prompt for explainer (e.g. 'รีไฟแนนซ์บ้าน')",
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=Path,
+        default=None,
+        help="Target output MP4 file path",
+    )
+    parser.add_argument(
+        "--publish",
+        action="store_true",
+        help="Publish the generated video Reel to Facebook Page",
+    )
     args = parser.parse_args()
 
-    result = run_pipeline(output_path=args.output, publish=args.publish)
+    if args.mode == "explainer":
+        target_out = args.output or Path("outputs/whiteboard-explainer.mp4")
+        result = run_explainer_pipeline(
+            topic_prompt=args.topic,
+            output_path=target_out,
+            publish=args.publish,
+        )
+    else:
+        target_out = args.output or Path("outputs/latest-reel.mp4")
+        result = run_pipeline(
+            output_path=target_out,
+            publish=args.publish,
+        )
+
     print("=" * 60)
-    print("REEL AUTOMATION COMPLETE")
+    print(f"[{args.mode.upper()} REEL AUTOMATION COMPLETE]")
     print(f"Title: {result['title']}")
     print(f"File: {result['video_path']} ({int(result['video_size']):,} bytes)")
+    if "duration" in result:
+        print(f"Duration: {result['duration']}")
     print(f"Publish Status: {result['publish_url']}")
     print("=" * 60)
 

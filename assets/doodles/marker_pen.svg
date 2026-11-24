@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width="300" height="300" fill="none">
+  <!-- Tilted Marker Pen -->
+  <g transform="translate(60, 40) rotate(35, 100, 100)">
+    <!-- Shadow -->
+    <path d="M 80 200 L 95 240 L 75 245 Z" fill="rgba(0,0,0,0.15)"/>
+    <!-- Tip / Chisel Point -->
+    <polygon points="85,210 95,235 75,235 70,210" fill="#3F8A8C" stroke="#2B3A42" stroke-width="4"/>
+    <polygon points="80,230 95,235 75,235" fill="#205B5C"/>
+    <!-- Grip Collar -->
+    <rect x="68" y="185" width="28" height="25" rx="4" fill="#3F8A8C" stroke="#2B3A42" stroke-width="5"/>
+    <!-- Main Pen Body -->
+    <rect x="64" y="40" width="36" height="145" rx="8" fill="#FFFFFF" stroke="#2B3A42" stroke-width="6"/>
+    <!-- Grip Accent Lines -->
+    <line x1="68" y1="70" x2="96" y2="70" stroke="#3F8A8C" stroke-width="4"/>
+    <line x1="68" y1="80" x2="96" y2="80" stroke="#3F8A8C" stroke-width="4"/>
+    <!-- Top Cap / End plug -->
+    <path d="M66 40 L66 22 C66 18, 72 15, 82 15 C92 15, 98 18, 98 22 L98 40" fill="#3F8A8C" stroke="#2B3A42" stroke-width="5"/>
+  </g>
+</svg>

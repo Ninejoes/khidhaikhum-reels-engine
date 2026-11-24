@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="500" height="500" fill="none">
+  <!-- Triangle Outer -->
+  <path d="M250 50 L460 420 C470 435, 460 450, 440 450 L60 450 C40 450, 30 435, 40 420 Z" stroke="#E06D53" stroke-width="22" stroke-linejoin="round" fill="#FDF2EE"/>
+  <!-- Inner dashed border -->
+  <path d="M250 110 L415 410 L85 410 Z" stroke="#E06D53" stroke-width="6" stroke-dasharray="14 10" stroke-linejoin="round"/>
+  <!-- Exclamation Mark -->
+  <line x1="250" y1="180" x2="250" y2="310" stroke="#2B3A42" stroke-width="24" stroke-linecap="round"/>
+  <circle cx="250" cy="370" r="14" fill="#2B3A42"/>
+</svg>

@@ -1,17 +1,25 @@
-name: Automated News Reel Engine
+name: Automated Reels Engine (Whiteboard Explainer & News)
 
 on:
   schedule:
     # Bangkok is UTC+7.
-    # 01:30 UTC -> 08:30 Bangkok (Morning Market Open)
-    # 05:30 UTC -> 12:30 Bangkok (Midday Market Summary)
-    # 09:30 UTC -> 16:30 Bangkok (Market Close Summary)
+    # 01:30 UTC -> 08:30 Bangkok (Morning Financial Explainer)
+    # 05:30 UTC -> 12:30 Bangkok (Midday Summary)
+    # 09:30 UTC -> 16:30 Bangkok (Afternoon Explainer)
     # 13:30 UTC -> 20:30 Bangkok (Evening / Global Markets)
     - cron: '30 1,5,9,13 * * *'
   workflow_dispatch:
     inputs:
+      mode:
+        description: 'Reel Mode: explainer (Whiteboard 2min) or news (Breaking News 35s)'
+        type: choice
+        options:
+          - explainer
+          - news
+        default: 'explainer'
+        required: true
       publish:
-        description: 'Publish generated Reel to Facebook (default is render-only preview)'
+        description: 'Publish generated Reel to Facebook Page (default is false for preview)'
         type: boolean
         default: false
         required: false
@@ -20,7 +28,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: news-reel-automation
+  group: reels-engine-automation
   cancel-in-progress: false
 
 jobs:
@@ -42,32 +50,28 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            ffmpeg libcairo2 libfribidi0 fontconfig fonts-noto-core
+            ffmpeg libcairo2 libfribidi0 fontconfig fonts-noto-core fonts-thai-tlwg
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Verify Thai text shaping & RAQM
-        run: |
-          python -c "from PIL import features; print('Pillow RAQM available:', features.check('raqm'))"
-
-      - name: Render News Reel (Preview Mode)
+      - name: Render Video Reel (Preview Mode)
         if: github.event_name == 'workflow_dispatch' && inputs.publish != true
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_TTS_MODEL: gemini-3.8-flash-tts
           GEMINI_TTS_VOICE: Charon
         run: |
-          python main.py --output outputs/latest-reel.mp4
+          python main.py --mode ${{ inputs.mode }} --output outputs/rendered-reel.mp4
 
       - name: Upload Video Preview Artifact
         if: github.event_name == 'workflow_dispatch' && inputs.publish != true
         uses: actions/upload-artifact@v4
         with:
-          name: news-reel-preview
-          path: outputs/latest-reel.mp4
+          name: reel-preview-${{ inputs.mode }}
+          path: outputs/rendered-reel.mp4
           if-no-files-found: error
           retention-days: 2
 
@@ -85,7 +89,8 @@ jobs:
           AUTO_PUBLISH_SECRET: ${{ secrets.AUTO_PUBLISH_SECRET }}
           SIWC_BYPASS_TOKEN: ${{ secrets.SIWC_BYPASS_TOKEN }}
         run: |
-          python main.py --publish --output outputs/latest-reel.mp4
+          MODE="${{ inputs.mode || 'explainer' }}"
+          python main.py --mode "$MODE" --publish --output outputs/rendered-reel.mp4
 
       - name: Clean temporary files
         if: always()
