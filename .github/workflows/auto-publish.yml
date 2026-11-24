@@ -1,0 +1,93 @@
+name: Automated News Reel Engine
+
+on:
+  schedule:
+    # Bangkok is UTC+7.
+    # 01:30 UTC -> 08:30 Bangkok (Morning Market Open)
+    # 05:30 UTC -> 12:30 Bangkok (Midday Market Summary)
+    # 09:30 UTC -> 16:30 Bangkok (Market Close Summary)
+    # 13:30 UTC -> 20:30 Bangkok (Evening / Global Markets)
+    - cron: '30 1,5,9,13 * * *'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish generated Reel to Facebook (default is render-only preview)'
+        type: boolean
+        default: false
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: news-reel-automation
+  cancel-in-progress: false
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install system dependencies (FFmpeg, Cairo, Thai Fonts)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ffmpeg libcairo2 libfribidi0 fontconfig fonts-noto-core
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify Thai text shaping & RAQM
+        run: |
+          python -c "from PIL import features; print('Pillow RAQM available:', features.check('raqm'))"
+
+      - name: Render News Reel (Preview Mode)
+        if: github.event_name == 'workflow_dispatch' && inputs.publish != true
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_TTS_MODEL: gemini-3.8-flash-tts
+          GEMINI_TTS_VOICE: Charon
+        run: |
+          python main.py --output outputs/latest-reel.mp4
+
+      - name: Upload Video Preview Artifact
+        if: github.event_name == 'workflow_dispatch' && inputs.publish != true
+        uses: actions/upload-artifact@v4
+        with:
+          name: news-reel-preview
+          path: outputs/latest-reel.mp4
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Render and Publish Reel to Facebook
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.publish == true)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_TTS_MODEL: gemini-3.8-flash-tts
+          GEMINI_TTS_VOICE: Charon
+          # Direct Meta Graph API mode (Preferred)
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
+          # Or Newsroom Worker gateway fallback mode
+          NEWSROOM_URL: ${{ secrets.NEWSROOM_URL }}
+          AUTO_PUBLISH_SECRET: ${{ secrets.AUTO_PUBLISH_SECRET }}
+          SIWC_BYPASS_TOKEN: ${{ secrets.SIWC_BYPASS_TOKEN }}
+        run: |
+          python main.py --publish --output outputs/latest-reel.mp4
+
+      - name: Clean temporary files
+        if: always()
+        run: |
+          rm -rf outputs
