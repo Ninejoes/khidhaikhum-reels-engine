@@ -195,6 +195,105 @@ def save_story_to_newsroom_mcp(
     return str(item_id), curated_sources
 
 
+def discover_eligible_newsroom_item(
+    base_url: str,
+    secret: str,
+    siwc_token: str | None = None,
+) -> tuple[str, list[dict]] | None:
+    """Discovers an eligible script_ready or retryable item from Newsroom D1."""
+    headers = {"Authorization": f"Bearer {secret}"}
+    if siwc_token:
+        headers["OAI-Sites-Authorization"] = f"Bearer {siwc_token}"
+
+    curated_sources = [
+        {
+            "name": "ธนาคารแห่งประเทศไทย (BOT)",
+            "url": "https://www.bot.or.th/th/financial-literacy.html",
+            "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d4/Bank_of_Thailand_headquarters.jpg/1280px-Bank_of_Thailand_headquarters.jpg",
+            "imageSourceUrl": "https://commons.wikimedia.org/wiki/File:Bank_of_Thailand_headquarters.jpg",
+            "imageAlt": "สำนักงานใหญ่ ธนาคารแห่งประเทศไทย",
+            "credit": "Wikimedia Commons / Bank of Thailand",
+            "imageLicense": "CC0 1.0",
+            "imageLicenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+            "imageReuseAuthorized": True,
+        },
+        {
+            "name": "ตลาดหลักทรัพย์แห่งประเทศไทย (SET)",
+            "url": "https://www.set.or.th/th/market/index/set/overview",
+        },
+    ]
+
+    # 1. Query queue (breaking & summary)
+    for q_mode in ["breaking", "summary"]:
+        try:
+            r = requests.get(
+                f"{base_url.rstrip('/')}/api/automation/queue?mode={q_mode}",
+                headers=headers,
+                timeout=20,
+            )
+            logger.info("Newsroom queue (%s) status %s", q_mode, r.status_code)
+            if r.ok:
+                items = r.json().get("items") or []
+                if items and items[0].get("id"):
+                    item_id = str(items[0]["id"])
+                    logger.info(
+                        "Selected eligible item from %s queue: %s (%s)",
+                        q_mode,
+                        item_id,
+                        items[0].get("title", "")[:30],
+                    )
+                    return item_id, curated_sources
+        except Exception as exc:
+            logger.warning("Queue query (%s) failed: %s", q_mode, exc)
+
+    # 2. Query public news endpoint to inspect saved items in D1
+    try:
+        r_news = requests.get(f"{base_url.rstrip('/')}/api/news", timeout=20)
+        logger.info("Public /api/news status %s", r_news.status_code)
+        if r_news.ok:
+            items = r_news.json().get("items") or []
+            logger.info("Discovered %d saved items in Newsroom D1", len(items))
+            for it in items:
+                it_id = str(it.get("id"))
+                it_status = it.get("status")
+                it_post_url = it.get("facebookPostUrl")
+                logger.info(
+                    " - Item: %s | status: %s | posted: %s | title: %s",
+                    it_id,
+                    it_status,
+                    bool(it_post_url),
+                    it.get("title", "")[:30],
+                )
+
+                if it_status == "script_ready" and not it_post_url:
+                    logger.info("Selected ready unposted item from D1: %s", it_id)
+                    return it_id, curated_sources
+
+                if it_status == "publish_check_required" and not it_post_url:
+                    # Reset to script_ready via /api/automation/retry
+                    try:
+                        ret_r = requests.post(
+                            f"{base_url.rstrip('/')}/api/automation/retry",
+                            headers=headers,
+                            json={"itemId": it_id},
+                            timeout=20,
+                        )
+                        logger.info(
+                            "Retry request for %s -> HTTP %s: %s",
+                            it_id,
+                            ret_r.status_code,
+                            ret_r.text[:200],
+                        )
+                        if ret_r.ok:
+                            return it_id, curated_sources
+                    except Exception as ret_err:
+                        logger.warning("Retry request failed: %s", ret_err)
+    except Exception as exc:
+        logger.warning("Query /api/news failed: %s", exc)
+
+    return None
+
+
 def publish_via_newsroom(
     video_path: Path,
     story: ProcessedStory,
@@ -211,8 +310,20 @@ def publish_via_newsroom(
         headers["OAI-Sites-Authorization"] = f"Bearer {siwc_token}"
 
     item_id = story.metadata.get("item_id")
+    sources_payload = None
+
     if not item_id:
-        item_id, sources_payload = save_story_to_newsroom_mcp(story, base_url, secret, siwc_token)
+        try:
+            item_id, sources_payload = save_story_to_newsroom_mcp(story, base_url, secret, siwc_token)
+        except Exception as mcp_err:
+            logger.warning("MCP news_save failed (%s). Falling back to queue discovery...", mcp_err)
+            discovered = discover_eligible_newsroom_item(base_url, secret, siwc_token)
+            if discovered:
+                item_id, sources_payload = discovered
+            else:
+                raise RuntimeError(
+                    f"No eligible item found in Newsroom queue or D1 database. MCP save failed: {mcp_err}"
+                )
     else:
         sources_payload = [
             {
