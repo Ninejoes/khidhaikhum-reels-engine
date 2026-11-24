@@ -136,10 +136,24 @@ def get_curated_refinance_topic() -> ExplainerTopic:
 def generate_explainer_topic(
     topic_prompt: str | None = None, api_key: str | None = None
 ) -> ExplainerTopic:
-    """Generates an explainer topic via Gemini 2.5 Flash, or returns the curated flagship topic."""
+    """Generates an explainer topic via Gemini 2.5 Flash, or returns rotating curated topics."""
     key = api_key or os.environ.get("GEMINI_API_KEY", "").strip()
-    if not key or not topic_prompt:
-        logger.info("Using curated flagship Refinance Explainer topic")
+
+    if not topic_prompt:
+        rotating_ideas = [
+            "วิธีโปะบ้านให้หมดหนี้ไวขึ้น 10 ปี ประหยัดดอกเบี้ยหลักล้าน",
+            "บัตรเครดิต vs บัตรกดเงินสด ดอกเบี้ยต่างกันขนาดไหน จ่ายขั้นต่ำน่ากลัวยังไง",
+            "ดอกเบี้ยทบต้น มหัศจรรย์การเงิน เริ่มออมเร็วเห็นตัวเลขต่างกันมหาศาล",
+            "กองทุนรวม vs ฝากประจำ เอาเงินไว้ไหนคุ้มสุดในยุคนี้",
+            "ผ่อนของ 0% คุ้มจริงไหม หรือหลุมพรางสร้างหนี้ไม่รู้ตัว",
+        ]
+        import datetime
+        day_idx = datetime.datetime.now().timetuple().tm_yday % len(rotating_ideas)
+        topic_prompt = rotating_ideas[day_idx]
+        logger.info("Auto-selected rotating topic for scheduled run: %s", topic_prompt)
+
+    if not key:
+        logger.info("Using curated flagship Refinance Explainer topic (no API key)")
         return get_curated_refinance_topic()
 
     try:
