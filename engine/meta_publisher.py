@@ -248,7 +248,7 @@ def discover_eligible_newsroom_item(
 
     # 2. Query public news endpoint to inspect saved items in D1
     try:
-        r_news = requests.get(f"{base_url.rstrip('/')}/api/news", timeout=20)
+        r_news = requests.get(f"{base_url.rstrip('/')}/api/news", headers=headers, timeout=20)
         logger.info("Public /api/news status %s", r_news.status_code)
         if r_news.ok:
             items = r_news.json().get("items") or []
@@ -288,6 +288,8 @@ def discover_eligible_newsroom_item(
                             return it_id, curated_sources
                     except Exception as ret_err:
                         logger.warning("Retry request failed: %s", ret_err)
+        else:
+            logger.warning("/api/news failed with HTTP %s: %s", r_news.status_code, r_news.text[:300])
     except Exception as exc:
         logger.warning("Query /api/news failed: %s", exc)
 
