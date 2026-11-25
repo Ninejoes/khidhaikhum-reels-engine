@@ -1,0 +1,194 @@
+name: News & Whiteboard Reel worker
+
+on:
+  schedule:
+    # Bangkok is UTC+7 year-round.
+    # 01:25 UTC -> 08:25 Bangkok (Morning News & Personal Finance Explainer)
+    - cron: '25 1 * * *'
+    # 05:25 UTC -> 12:25 Bangkok (Midday Trending Newsjacking Explainer)
+    - cron: '25 5 * * *'
+    # 10:25 UTC -> 17:25 Bangkok (Evening Policies, Taxes & Debt Explainer)
+    - cron: '25 10 * * *'
+    # 13:25 UTC -> 20:25 Bangkok (Night Global Markets, Gold & Commodities Explainer)
+    - cron: '25 13 * * *'
+  repository_dispatch:
+    types: [publish-reel, scheduled-publish]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Reel Mode
+        type: choice
+        options:
+          - whiteboard-explainer
+          - auto
+          - summary
+          - breaking
+        default: whiteboard-explainer
+        required: true
+      publish:
+        description: Publish to Facebook Page (otherwise render preview only)
+        type: boolean
+        default: false
+        required: false
+      topic:
+        description: Custom topic for whiteboard explainer (e.g. 'รีไฟแนนซ์บ้าน คืออะไร?')
+        type: string
+        default: ''
+        required: false
+      retry_item_id:
+        description: Explicitly retry one saved item with an unconfirmed previous publish
+        type: string
+        default: ''
+        required: false
+      item_id:
+        description: Target one exact verified newsroom item
+        type: string
+        default: ''
+        required: false
+      delay_seconds:
+        description: Wait this many seconds before starting the requested run
+        type: string
+        default: '0'
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: news-reel-publisher
+  cancel-in-progress: false
+
+jobs:
+  render-and-publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Record scheduled trigger
+        if: github.event_name == 'schedule'
+        run: |
+          echo "Scheduled publisher event received at $(date -u --iso-8601=seconds) UTC"
+          echo "Configured schedule: ${{ github.event.schedule }}"
+
+      - name: Check out publisher
+        uses: actions/checkout@v4
+
+      - name: Wait before delayed test
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          DELAY_SECONDS: ${{ inputs.delay_seconds || '0' }}
+        run: |
+          if ! [[ "$DELAY_SECONDS" =~ ^[0-9]{1,3}$ ]]; then
+            echo "delay_seconds must be an integer between 0 and 600" >&2
+            exit 1
+          fi
+          delay=$((10#$DELAY_SECONDS))
+          if (( delay > 600 )); then
+            echo "delay_seconds must not exceed 600" >&2
+            exit 1
+          fi
+          if (( delay > 0 )); then
+            echo "Delayed test starts in ${delay} seconds"
+            sleep "$delay"
+          fi
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install rendering tools and Thai fonts
+        run: |
+          sudo timeout 180 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          sudo timeout 180 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y --no-install-recommends \
+            ffmpeg libcairo2 libfribidi0 fontconfig fonts-noto-core fonts-thai-tlwg fonts-dejavu-core
+          ffmpeg -version >/dev/null
+          google-chrome --version || chromium-browser --version || true
+
+      - name: Install Python dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/pip install -r requirements.txt
+
+      - name: Render Whiteboard Explainer (Preview Mode)
+        if: github.event_name == 'workflow_dispatch' && inputs.publish != true && inputs.mode == 'whiteboard-explainer'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CHROME_PATH: /usr/bin/google-chrome
+        run: |
+          TOPIC_ARG=""
+          if [ -n "${{ inputs.topic }}" ]; then
+            TOPIC_ARG="--topic \"${{ inputs.topic }}\""
+          fi
+          ITEM_ARG=""
+          if [ -n "${{ inputs.item_id }}" ]; then
+            ITEM_ARG="--item-id \"${{ inputs.item_id }}\""
+          fi
+          .venv/bin/python main.py --mode explainer $TOPIC_ARG $ITEM_ARG --output outputs/whiteboard-reel.mp4
+
+      - name: Render News Reel (Preview Mode)
+        if: inputs.mode != 'whiteboard-explainer' && inputs.publish != true && github.event_name == 'workflow_dispatch'
+        env:
+          NEWSROOM_URL: ${{ secrets.NEWSROOM_URL }}
+          AUTO_PUBLISH_SECRET: ${{ secrets.AUTO_PUBLISH_SECRET }}
+          SIWC_BYPASS_TOKEN: ${{ secrets.SIWC_BYPASS_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TTS_PROVIDER: gemini
+          GEMINI_TTS_MODEL: gemini-3.8-flash-tts
+          GEMINI_TTS_VOICE: Charon
+          REQUESTED_MODE: ${{ inputs.mode || 'auto' }}
+          REQUESTED_ITEM_ID: ${{ inputs.item_id || '' }}
+        run: .venv/bin/python renderer/run.py --render-only --output outputs/news-reel.mp4
+
+      - name: Upload rendered video preview
+        if: github.event_name == 'workflow_dispatch' && inputs.publish != true
+        uses: actions/upload-artifact@v4
+        with:
+          name: reel-preview
+          path: outputs/*.mp4
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Render and Publish Whiteboard Explainer to Facebook
+        if: (github.event_name == 'schedule') || (github.event_name == 'repository_dispatch') || (github.event_name == 'workflow_dispatch' && inputs.publish == true && (inputs.mode == 'whiteboard-explainer' || inputs.mode == 'auto' || inputs.mode == ''))
+        env:
+          NEWSROOM_URL: ${{ secrets.NEWSROOM_URL }}
+          AUTO_PUBLISH_SECRET: ${{ secrets.AUTO_PUBLISH_SECRET }}
+          SIWC_BYPASS_TOKEN: ${{ secrets.SIWC_BYPASS_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CHROME_PATH: /usr/bin/google-chrome
+        run: |
+          TOPIC_ARG=""
+          if [ -n "${{ inputs.topic }}" ]; then
+            TOPIC_ARG="--topic \"${{ inputs.topic }}\""
+          fi
+          ITEM_ARG=""
+          if [ -n "${{ inputs.item_id }}" ]; then
+            ITEM_ARG="--item-id \"${{ inputs.item_id }}\""
+          fi
+          .venv/bin/python main.py --mode explainer $TOPIC_ARG $ITEM_ARG --publish --output outputs/whiteboard-reel.mp4
+
+      - name: Render and Publish News Reel to Facebook
+        if: github.event_name == 'workflow_dispatch' && inputs.publish == true && (inputs.mode == 'breaking' || inputs.mode == 'summary')
+        env:
+          NEWSROOM_URL: ${{ secrets.NEWSROOM_URL }}
+          AUTO_PUBLISH_SECRET: ${{ secrets.AUTO_PUBLISH_SECRET }}
+          SIWC_BYPASS_TOKEN: ${{ secrets.SIWC_BYPASS_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TTS_PROVIDER: gemini
+          GEMINI_TTS_MODEL: gemini-3.8-flash-tts
+          GEMINI_TTS_VOICE: Charon
+          REQUESTED_MODE: ${{ inputs.mode || 'auto' }}
+          RETRY_ITEM_ID: ${{ inputs.retry_item_id || '' }}
+          REQUESTED_ITEM_ID: ${{ inputs.item_id || '' }}
+        run: .venv/bin/python renderer/run.py
+
+      - name: Remove temporary media and logs
+        if: always()
+        run: |
+          rm -rf outputs
+          rm -rf renderer/work
+          find "${TMPDIR:-/tmp}" -maxdepth 1 -type d -name 'khidhaikhum-*' -exec rm -rf {} +
