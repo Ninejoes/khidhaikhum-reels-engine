@@ -57,6 +57,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.item_id:
+        args.item_id = args.item_id.strip('"\'').strip()
+    if args.topic:
+        args.topic = args.topic.strip('"\'').strip()
+
     if args.mode == "explainer":
         target_out = args.output or Path("outputs/whiteboard-explainer.mp4")
         result = run_explainer_pipeline(

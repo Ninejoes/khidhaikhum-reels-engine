@@ -16,8 +16,14 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_FEEDS = [
     {
+        "name": "มติชน เศรษฐกิจ & การเงิน",
+        "url": "https://www.matichon.co.th/economy",
+        "rss": "https://www.matichon.co.th/economy/feed",
+        "category": "เศรษฐกิจและการเงิน",
+    },
+    {
         "name": "SET News / ตลาดหลักทรัพย์ฯ",
-        "url": "https://www.set.or.th/th/market/news-and-alert/news",  # Fallback source link
+        "url": "https://www.set.or.th/th/market/news-and-alert/news",
         "rss": "https://www.settrade.com/rss/setNews.xml",
         "category": "การเงินและการลงทุน",
     },

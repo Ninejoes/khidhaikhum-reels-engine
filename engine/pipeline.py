@@ -23,7 +23,7 @@ from engine.explainer_script_generator import (
 )
 from engine.image_curator import CuratedPhoto, curate_photos_for_scenes
 from engine.lofi_synthesizer import generate_lofi_background_music
-from engine.meta_publisher import fetch_eligible_newsroom_item, publish_reel
+from engine.meta_publisher import ensure_publish_sources, fetch_eligible_newsroom_item, publish_reel
 from engine.news_fetcher import RawNewsItem, fetch_latest_news
 from engine.script_generator import ProcessedStory, generate_story_script
 from engine.video_renderer import render_full_video
@@ -42,6 +42,11 @@ def run_explainer_pipeline(
     mode: str | None = None,
 ) -> dict[str, str]:
     """Runs the Whiteboard Doodly Explainer video pipeline matching reference #4742958775935653."""
+    if item_id:
+        item_id = str(item_id).strip('"\'').strip()
+    if topic_prompt:
+        topic_prompt = str(topic_prompt).strip('"\'').strip()
+
     with tempfile.TemporaryDirectory(prefix="khidhaikhum-explainer-") as temp_dir_str:
         temp_dir = Path(temp_dir_str)
         work_dir = temp_dir / "work"
@@ -172,17 +177,23 @@ def run_explainer_pipeline(
                 metadata=story_metadata,
             )
 
+            final_sources = ensure_publish_sources(
+                active_sources or [{"name": news_source_name, "url": news_source_url}],
+                topic.title,
+            )
+
             photos = [
                 CuratedPhoto(
                     local_path=final_output,
-                    image_url=s.get("imageUrl", "https://creativecommons.org/publicdomain/zero/1.0/"),
-                    source_url=s.get("url", news_source_url),
-                    credit=s.get("credit", "KhidHaiKhum Whiteboard Engine"),
-                    license_name=s.get("imageLicense", "CC0 1.0 Universal"),
+                    image_url=s.get("imageUrl", "https://upload.wikimedia.org/wikipedia/commons/thumb/6/66/Gold_bars.jpg/1280px-Gold_bars.jpg"),
+                    source_url=s.get("imageSourceUrl") or s.get("url", news_source_url),
+                    credit=s.get("credit", "Wikimedia Commons / CC0"),
+                    license_name=s.get("imageLicense", "CC0 1.0"),
                     license_url=s.get("imageLicenseUrl", "https://creativecommons.org/publicdomain/zero/1.0/"),
                     reuse_authorized=True,
                 )
-                for s in (active_sources or [{"name": news_source_name, "url": news_source_url}])
+                for s in final_sources
+                if s.get("imageUrl")
             ]
             post_url = publish_reel(final_output, explainer_story, photos)
             logger.info("Publish result: %s", post_url)

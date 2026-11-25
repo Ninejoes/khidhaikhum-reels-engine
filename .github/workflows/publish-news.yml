@@ -119,15 +119,15 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           CHROME_PATH: /usr/bin/google-chrome
         run: |
-          TOPIC_ARG=""
+          TOPIC_ARG=()
           if [ -n "${{ inputs.topic }}" ]; then
-            TOPIC_ARG="--topic \"${{ inputs.topic }}\""
+            TOPIC_ARG=(--topic "${{ inputs.topic }}")
           fi
-          ITEM_ARG=""
+          ITEM_ARG=()
           if [ -n "${{ inputs.item_id }}" ]; then
-            ITEM_ARG="--item-id \"${{ inputs.item_id }}\""
+            ITEM_ARG=(--item-id "${{ inputs.item_id }}")
           fi
-          .venv/bin/python main.py --mode explainer $TOPIC_ARG $ITEM_ARG --output outputs/whiteboard-reel.mp4
+          .venv/bin/python main.py --mode explainer "${TOPIC_ARG[@]}" "${ITEM_ARG[@]}" --output outputs/whiteboard-reel.mp4
 
       - name: Render News Reel (Preview Mode)
         if: inputs.mode != 'whiteboard-explainer' && inputs.publish != true && github.event_name == 'workflow_dispatch'
@@ -161,15 +161,15 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           CHROME_PATH: /usr/bin/google-chrome
         run: |
-          TOPIC_ARG=""
+          TOPIC_ARG=()
           if [ -n "${{ inputs.topic }}" ]; then
-            TOPIC_ARG="--topic \"${{ inputs.topic }}\""
+            TOPIC_ARG=(--topic "${{ inputs.topic }}")
           fi
-          ITEM_ARG=""
+          ITEM_ARG=()
           if [ -n "${{ inputs.item_id }}" ]; then
-            ITEM_ARG="--item-id \"${{ inputs.item_id }}\""
+            ITEM_ARG=(--item-id "${{ inputs.item_id }}")
           fi
-          .venv/bin/python main.py --mode explainer $TOPIC_ARG $ITEM_ARG --publish --output outputs/whiteboard-reel.mp4
+          .venv/bin/python main.py --mode explainer "${TOPIC_ARG[@]}" "${ITEM_ARG[@]}" --publish --output outputs/whiteboard-reel.mp4
 
       - name: Render and Publish News Reel to Facebook
         if: github.event_name == 'workflow_dispatch' && inputs.publish == true && (inputs.mode == 'breaking' || inputs.mode == 'summary')
