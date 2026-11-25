@@ -195,12 +195,14 @@ def save_story_to_newsroom_mcp(
     return str(item_id), curated_sources
 
 
-def discover_eligible_newsroom_item(
+def fetch_eligible_newsroom_item(
     base_url: str,
     secret: str,
     siwc_token: str | None = None,
-) -> tuple[str, list[dict]] | None:
-    """Discovers an eligible script_ready or retryable item from Newsroom D1."""
+    item_id: str | None = None,
+    mode: str | None = None,
+) -> tuple[dict[str, Any], list[dict]] | None:
+    """Fetches an eligible news item dict and sources from Newsroom D1 queue or database."""
     headers = {"Authorization": f"Bearer {secret}"}
     if siwc_token:
         headers["OAI-Sites-Authorization"] = f"Bearer {siwc_token}"
@@ -223,11 +225,28 @@ def discover_eligible_newsroom_item(
         },
     ]
 
-    # 1. Query queue (breaking & summary)
-    for q_mode in ["breaking", "summary"]:
+    # If explicit item_id requested, check retry endpoint or queue
+    if item_id:
         try:
+            retry_resp = requests.post(
+                f"{base_url.rstrip('/')}/api/automation/retry",
+                headers=headers,
+                json={"itemId": item_id},
+                timeout=20,
+            )
+            logger.info("Explicit item retry response: %s", retry_resp.status_code)
+        except Exception as err:
+            logger.warning("Explicit item retry failed: %s", err)
+
+    modes_to_try = [mode] if mode else ["breaking", "summary"]
+    for q_mode in modes_to_try:
+        try:
+            params = {"mode": q_mode}
+            if item_id:
+                params["itemId"] = item_id
             r = requests.get(
-                f"{base_url.rstrip('/')}/api/automation/queue?mode={q_mode}",
+                f"{base_url.rstrip('/')}/api/automation/queue",
+                params=params,
                 headers=headers,
                 timeout=20,
             )
@@ -235,18 +254,19 @@ def discover_eligible_newsroom_item(
             if r.ok:
                 items = r.json().get("items") or []
                 if items and items[0].get("id"):
-                    item_id = str(items[0]["id"])
+                    top_item = items[0]
+                    item_sources = top_item.get("sources") or curated_sources
                     logger.info(
                         "Selected eligible item from %s queue: %s (%s)",
                         q_mode,
-                        item_id,
-                        items[0].get("title", "")[:30],
+                        top_item.get("id"),
+                        top_item.get("title", "")[:35],
                     )
-                    return item_id, curated_sources
+                    return top_item, item_sources
         except Exception as exc:
             logger.warning("Queue query (%s) failed: %s", q_mode, exc)
 
-    # 2. Query public news endpoint to inspect saved items in D1
+    # Fallback: Query public /api/news
     try:
         r_news = requests.get(f"{base_url.rstrip('/')}/api/news", headers=headers, timeout=20)
         logger.info("Public /api/news status %s", r_news.status_code)
@@ -257,20 +277,15 @@ def discover_eligible_newsroom_item(
                 it_id = str(it.get("id"))
                 it_status = it.get("status")
                 it_post_url = it.get("facebookPostUrl")
-                logger.info(
-                    " - Item: %s | status: %s | posted: %s | title: %s",
-                    it_id,
-                    it_status,
-                    bool(it_post_url),
-                    it.get("title", "")[:30],
-                )
+
+                if item_id and it_id != str(item_id):
+                    continue
 
                 if it_status == "script_ready" and not it_post_url:
                     logger.info("Selected ready unposted item from D1: %s", it_id)
-                    return it_id, curated_sources
+                    return it, it.get("sources") or curated_sources
 
                 if it_status == "publish_check_required" and not it_post_url:
-                    # Reset to script_ready via /api/automation/retry
                     try:
                         ret_r = requests.post(
                             f"{base_url.rstrip('/')}/api/automation/retry",
@@ -278,21 +293,26 @@ def discover_eligible_newsroom_item(
                             json={"itemId": it_id},
                             timeout=20,
                         )
-                        logger.info(
-                            "Retry request for %s -> HTTP %s: %s",
-                            it_id,
-                            ret_r.status_code,
-                            ret_r.text[:200],
-                        )
                         if ret_r.ok:
-                            return it_id, curated_sources
+                            return it, it.get("sources") or curated_sources
                     except Exception as ret_err:
                         logger.warning("Retry request failed: %s", ret_err)
-        else:
-            logger.warning("/api/news failed with HTTP %s: %s", r_news.status_code, r_news.text[:300])
     except Exception as exc:
         logger.warning("Query /api/news failed: %s", exc)
 
+    return None
+
+
+def discover_eligible_newsroom_item(
+    base_url: str,
+    secret: str,
+    siwc_token: str | None = None,
+) -> tuple[str, list[dict]] | None:
+    """Discovers an eligible script_ready or retryable item from Newsroom D1."""
+    result = fetch_eligible_newsroom_item(base_url, secret, siwc_token)
+    if result:
+        item_obj, sources = result
+        return str(item_obj["id"]), sources
     return None
 
 

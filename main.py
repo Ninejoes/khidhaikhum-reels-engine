@@ -38,6 +38,12 @@ def main() -> None:
         help="Optional topic prompt for explainer (e.g. 'รีไฟแนนซ์บ้าน')",
     )
     parser.add_argument(
+        "--item-id",
+        type=str,
+        default=None,
+        help="Explicit Newsroom D1 item ID to render and publish",
+    )
+    parser.add_argument(
         "--output",
         "-o",
         type=Path,
@@ -57,6 +63,7 @@ def main() -> None:
             topic_prompt=args.topic,
             output_path=target_out,
             publish=args.publish,
+            item_id=args.item_id,
         )
     else:
         target_out = args.output or Path("outputs/latest-reel.mp4")

@@ -12,12 +12,18 @@ import logging
 import os
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
-from engine.explainer_script_generator import ExplainerTopic, generate_explainer_topic
+from engine.explainer_script_generator import (
+    ExplainerTopic,
+    convert_news_to_explainer_topic,
+    generate_explainer_topic,
+    get_scheduled_slot_topic,
+)
 from engine.image_curator import CuratedPhoto, curate_photos_for_scenes
 from engine.lofi_synthesizer import generate_lofi_background_music
-from engine.meta_publisher import publish_reel
+from engine.meta_publisher import fetch_eligible_newsroom_item, publish_reel
 from engine.news_fetcher import RawNewsItem, fetch_latest_news
 from engine.script_generator import ProcessedStory, generate_story_script
 from engine.video_renderer import render_full_video
@@ -32,6 +38,8 @@ def run_explainer_pipeline(
     topic_prompt: str | None = None,
     output_path: Path | None = None,
     publish: bool = False,
+    item_id: str | None = None,
+    mode: str | None = None,
 ) -> dict[str, str]:
     """Runs the Whiteboard Doodly Explainer video pipeline matching reference #4742958775935653."""
     with tempfile.TemporaryDirectory(prefix="khidhaikhum-explainer-") as temp_dir_str:
@@ -39,8 +47,74 @@ def run_explainer_pipeline(
         work_dir = temp_dir / "work"
         work_dir.mkdir(parents=True, exist_ok=True)
 
+        newsroom_url = os.environ.get("NEWSROOM_URL", "").strip()
+        auto_secret = os.environ.get("AUTO_PUBLISH_SECRET", "").strip()
+        siwc_token = os.environ.get("SIWC_BYPASS_TOKEN", "").strip()
+        gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
+
+        active_item_id: str | None = None
+        active_sources: list[dict] = []
+        news_source_name = "คิดให้คุ้ม (Original Explainer)"
+        news_source_url = "https://facebook.com/1183632304836932"
+
         logger.info("Stage 1: Preparing Explainer topic and 5-beat storyboard...")
-        topic = generate_explainer_topic(topic_prompt)
+        if topic_prompt:
+            logger.info("Using explicit user topic prompt: %s", topic_prompt)
+            topic = generate_explainer_topic(topic_prompt, api_key=gemini_key)
+        else:
+            news_item_dict = None
+            # Step A: Query Newsroom D1 queue or public news endpoint
+            if newsroom_url and auto_secret:
+                logger.info("Checking Newsroom D1 queue for eligible news story...")
+                try:
+                    eligible = fetch_eligible_newsroom_item(
+                        newsroom_url, auto_secret, siwc_token, item_id=item_id, mode=mode
+                    )
+                    if eligible:
+                        news_item_dict, active_sources = eligible
+                        active_item_id = str(news_item_dict.get("id"))
+                        logger.info(
+                            "Discovered eligible news item from D1: %s (%s)",
+                            active_item_id,
+                            news_item_dict.get("title", "")[:40],
+                        )
+                except Exception as d1_err:
+                    logger.warning("Failed querying Newsroom queue: %s", d1_err)
+
+            # Step B: If Newsroom queue is empty, query live economic RSS feeds
+            if not news_item_dict:
+                logger.info("No unposted news in D1 queue. Checking live economic RSS feeds...")
+                try:
+                    rss_items = fetch_latest_news()
+                    if rss_items:
+                        top_rss = rss_items[0]
+                        news_item_dict = {
+                            "id": f"rss_{int(time.time())}",
+                            "title": top_rss.title,
+                            "summary": top_rss.summary,
+                            "impact": "กระทบต่อต้นทุนและเงินในกระเป๋าที่เราต้องวางแผน",
+                            "script": top_rss.summary,
+                            "category": top_rss.category,
+                            "sources": [{"name": top_rss.source_name, "url": top_rss.link}],
+                        }
+                        active_sources = news_item_dict["sources"]
+                        news_source_name = top_rss.source_name
+                        news_source_url = top_rss.link
+                        logger.info("Selected fresh news from RSS: %s", top_rss.title[:40])
+                except Exception as rss_err:
+                    logger.warning("Failed fetching live RSS news: %s", rss_err)
+
+            # Step C: Convert news item to Whiteboard Explainer 5 Beats
+            if news_item_dict:
+                topic = convert_news_to_explainer_topic(news_item_dict, api_key=gemini_key)
+                if active_sources:
+                    news_source_name = active_sources[0].get("name", news_source_name)
+                    news_source_url = active_sources[0].get("url", news_source_url)
+            else:
+                slot_topic = get_scheduled_slot_topic()
+                logger.info("No live news found; using scheduled editorial slot topic: %s", slot_topic)
+                topic = generate_explainer_topic(slot_topic, api_key=gemini_key)
+
         logger.info("Topic ready: %s (%d beats)", topic.title, len(topic.beats))
 
         # Synthesize narration for each beat individually for perfect sync
@@ -82,26 +156,35 @@ def run_explainer_pipeline(
         post_url = "render_only"
         if publish:
             logger.info("Stage 5: Publishing Explainer Reel to Facebook...")
-            dummy_story = ProcessedStory(
+            story_metadata = {}
+            if active_item_id:
+                story_metadata["item_id"] = active_item_id
+
+            explainer_story = ProcessedStory(
                 title=topic.title,
                 category=topic.category,
                 summary=topic.summary,
                 script=" ".join(b.spoken_script for b in topic.beats),
                 caption=topic.caption,
                 scenes=[],
-                source_name="คิดให้คุ้ม (Original Explainer)",
-                source_url="https://facebook.com/1183632304836932",
+                source_name=news_source_name,
+                source_url=news_source_url,
+                metadata=story_metadata,
             )
-            dummy_photos = [
+
+            photos = [
                 CuratedPhoto(
-                    title="Original Doodly Whiteboard Vector Art",
-                    source_url="https://creativecommons.org/publicdomain/zero/1.0/",
-                    credit="KhidHaiKhum Whiteboard Engine",
-                    license_name="CC0 1.0 Universal",
                     local_path=final_output,
+                    image_url=s.get("imageUrl", "https://creativecommons.org/publicdomain/zero/1.0/"),
+                    source_url=s.get("url", news_source_url),
+                    credit=s.get("credit", "KhidHaiKhum Whiteboard Engine"),
+                    license_name=s.get("imageLicense", "CC0 1.0 Universal"),
+                    license_url=s.get("imageLicenseUrl", "https://creativecommons.org/publicdomain/zero/1.0/"),
+                    reuse_authorized=True,
                 )
+                for s in (active_sources or [{"name": news_source_name, "url": news_source_url}])
             ]
-            post_url = publish_reel(final_output, dummy_story, dummy_photos)
+            post_url = publish_reel(final_output, explainer_story, photos)
             logger.info("Publish result: %s", post_url)
 
         return {
